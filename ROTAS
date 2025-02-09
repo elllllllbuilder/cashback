@@ -1,0 +1,15 @@
+📌 1. Cadastrar um Cliente (POST)
+Invoke-RestMethod -Uri "http://localhost:3000/clientes" -Method Post -Headers @{"Content-Type"="application/json"} -Body '{"nome":"João Silva","telefone":"12345","email":"joao@email.com"}'
+
+📌 2. Buscar Cliente por Telefone ou Nome (GET)
+Invoke-RestMethod -Uri "http://localhost:3000/clientes?search=11987654321" -Method Get
+
+📌 3. Adicionar Cashback para o Cliente (POST)
+Invoke-RestMethod -Uri "http://localhost:3000/cashback/1" -Method Post -Headers @{"Content-Type"="application/json"} -Body '{"valor": 50}'
+
+📌 4. Consultar Saldo de Cashback (GET)
+Invoke-RestMethod -Uri "http://localhost:3000/cashback/1" -Method Get
+
+📌 5. Usar Cashback (POST)
+Invoke-RestMethod -Uri "http://localhost:3000/cashback/usar/1" -Method Post -Headers @{"Content-Type"="application/json"} -Body '{"valor": 20}'
+
