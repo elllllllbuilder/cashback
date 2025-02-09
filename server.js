@@ -1,435 +1,191 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { body, validationResult } = require("express-validator");
+const twilio = require("twilio");
+const cron = require("node-cron");
 const os = require("os");
-const ngrok = require("ngrok");
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
+const SECRET_KEY = process.env.SECRET_KEY || "secretcashkey";
 
-// 🔗 Conectar ao banco de dados MySQL na nuvem
+// Conexão com banco MySQL
 const db = mysql.createPool({
-    host: "artfato.online",
-    user: "cashback",
-    password: "cashback@10",
-    database: "cashback",
-    port: 3306,
+    host: process.env.DB_HOST || "artfato.online",
+    user: process.env.DB_USER || "cashback",
+    password: process.env.DB_PASSWORD || "cashback@10",
+    database: process.env.DB_NAME || "cashback",
+    port: process.env.DB_PORT || 3306,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 });
 
-
 app.use(cors());
 app.use(express.json());
 
-console.log("✅ Servidor iniciado e cron carregado!");
+console.log("✅ Servidor iniciado!");
 
+// Middleware de autenticação
+const autenticar = (req, res, next) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ message: "Acesso negado. Faça login." });
 
-app.post("/clientes/:telefone/cashback", (req, res) => {
-    const { telefone } = req.params;
-    const { valor } = req.body;
+    try {
+        const decoded = jwt.verify(token, SECRET_KEY);
+        req.admin = decoded;
+        next();
+    } catch (error) {
+        res.status(401).json({ message: "Token inválido." });
+    }
+};
 
-    // Verifica se o cliente existe
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) {
-            console.error("Erro ao buscar cliente:", err);
-            return res.status(500).json({ error: "Erro ao buscar cliente." });
-        }
+// 🔹 Rota para Registrar um Administrador
+app.post("/register", [
+    body("nome").notEmpty(),
+    body("email").isEmail(),
+    body("senha").isLength({ min: 6 })
+], async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
+    const { nome, email, senha } = req.body;
+    const hashSenha = await bcrypt.hash(senha, 10);
 
-        // Atualiza o saldo do cliente
-        db.query(
-            "UPDATE clientes SET cashback = cashback + ? WHERE telefone = ?",
-            [valor, telefone],
-            (err) => {
-                if (err) {
-                    console.error("Erro ao atualizar saldo:", err);
-                    return res.status(500).json({ error: "Erro ao atualizar saldo." });
-                }
-
-                // ✅ Salva a transação no histórico
-                db.query(
-                    "INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'adicionado', ?, NOW())",
-                    [telefone, valor],
-                    (err) => {
-                        if (err) {
-                            console.error("Erro ao registrar transação:", err);
-                            return res.status(500).json({ error: "Erro ao registrar transação." });
-                        }
-
-                        console.log(`✅ Cashback de R$${valor} adicionado e registrado no histórico.`);
-                        res.json({
-                            message: `Cashback de R$${valor} adicionado com sucesso e registrado no histórico!`
-                        });
-                    }
-                );
-            }
-        );
-    });
-});
-
-
-
-// 🟢 Rota para buscar um cliente pelo telefone
-app.get("/clientes/:telefone", (req, res) => {
-    const { telefone } = req.params;
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        if (result.length > 0) {
-            res.json(result[0]);
-        } else {
-            res.status(404).json({ message: "Cliente não encontrado" });
-        }
-    });
-});
-
-// 🟢 Rota para cadastrar um novo cliente
-app.post("/clientes", (req, res) => {
-    const { telefone, nome, email } = req.body;
-    db.query("INSERT INTO clientes (telefone, nome, email) VALUES (?, ?, ?)",
-        [telefone, nome, email],
-        (err, result) => {
-            if (err) {
-                return res.status(500).json({ error: err.message });
-            }
-            res.json({ message: "Cliente cadastrado com sucesso!", id: result.insertId });
+    db.query("INSERT INTO administradores (nome, email, senha) VALUES (?, ?, ?)", 
+        [nome, email, hashSenha], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: "Administrador registrado com sucesso!" });
         }
     );
 });
 
-// 🟢 Rota para adicionar cashback a um cliente e salvar no histórico
-app.post("/clientes/:telefone/cashback", (req, res) => {
-    const { telefone } = req.params;
-    const { valor } = req.body;
+// 🔹 Rota para Login
+app.post("/login", async (req, res) => {
+    const { email, senha } = req.body;
 
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+    db.query("SELECT * FROM administradores WHERE email = ?", [email], async (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
+        if (result.length === 0) return res.status(401).json({ message: "E-mail ou senha incorretos." });
 
-        // Atualiza o saldo do cliente
-        db.query(
-            "UPDATE clientes SET cashback = cashback + ? WHERE telefone = ?",
-            [valor, telefone],
-            (err) => {
-                if (err) return res.status(500).json({ error: err.message });
+        const admin = result[0];
+        const senhaCorreta = await bcrypt.compare(senha, admin.senha);
 
-                // ✅ Salvar a transação no histórico
-                db.query(
-                    "INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'adicionado', ?, NOW())",
-                    [telefone, valor],
-                    (err) => {
-                        if (err) return res.status(500).json({ error: err.message });
+        if (!senhaCorreta) return res.status(401).json({ message: "E-mail ou senha incorretos." });
 
-                        res.json({
-                            message: `Cashback de R$${valor} adicionado com sucesso!`
-                        });
-                    }
-                );
-            }
-        );
+        const token = jwt.sign({ adminId: admin.id, email: admin.email }, SECRET_KEY, { expiresIn: "2h" });
+
+        res.json({ token });
     });
 });
 
+// 🔹 Rota para buscar clientes do admin logado
+app.get("/clientes", autenticar, (req, res) => {
+    const adminId = req.admin.adminId;
 
-
-
-// 🟢 Rota para consultar o saldo de cashback de um cliente
-app.get("/clientes/:telefone/cashback", (req, res) => {
-    const { telefone } = req.params;
-
-    db.query("SELECT cashback FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+    db.query("SELECT * FROM clientes WHERE admin_id = ?", [adminId], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
-
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
-
-        res.json({ telefone, cashback: result[0].cashback });
-    });
-});
-
-// 🟢 Rota para usar saldo de cashback e salvar no histórico
-app.post("/clientes/:telefone/use-cashback", (req, res) => {
-    const { telefone } = req.params;
-    const { valor } = req.body;
-
-    db.query("SELECT cashback FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
-
-        const saldoAtual = Number(result[0].cashback) || 0;
-
-        if (saldoAtual < valor) {
-            return res.status(400).json({ message: "Saldo insuficiente para usar esse cashback." });
-        }
-
-        // Atualiza o saldo do cliente
-        db.query(
-            "UPDATE clientes SET cashback = cashback - ? WHERE telefone = ?",
-            [valor, telefone],
-            (err) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                // ✅ Salvar a transação no histórico
-                db.query(
-                    "INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'usado', ?, NOW())",
-                    [telefone, valor],
-                    (err) => {
-                        if (err) return res.status(500).json({ error: err.message });
-
-                        res.json({
-                            message: `Cashback de R$${valor} usado com sucesso! Saldo restante: R$ ${(saldoAtual - valor).toFixed(2)}`
-                        });
-                    }
-                );
-            }
-        );
-    });
-});
-
-
-
-// 🟢 Rota para obter o total de cashback disponível no sistema
-app.get("/dashboard", (req, res) => {
-    db.query("SELECT SUM(cashback) AS total FROM clientes", (err, result) => {
-        if (err) {
-            console.error("Erro ao buscar total de cashback:", err);
-            return res.status(500).json({ error: "Erro no servidor ao buscar total de cashback." });
-        }
-
-        const totalCashback = result[0].total || 0; // Se for null, retorna 0
-        console.log("Total de cashback no sistema:", totalCashback); // Log para debug
-
-        res.json({ total: totalCashback });
-    });
-});
-
-
-// 🟢 Rota para buscar o histórico de transações de um cliente
-app.get("/clientes/:telefone/transacoes", (req, res) => {
-    const { telefone } = req.params;
-
-    db.query("SELECT * FROM transacoes WHERE telefone = ? ORDER BY data DESC", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        // ✅ Convertendo `valor` para número para evitar erros no frontend
-        const transacoesFormatadas = result.map(transacao => ({
-            ...transacao,
-            valor: Number(transacao.valor) // Garante que `valor` é numérico
-        }));
-
-        res.json(transacoesFormatadas);
-    });
-});
-
-const twilio = require("twilio");
-
-// 🟢 Rota para buscar todos os clientes e seus saldos
-app.get("/clientes", (req, res) => {
-    db.query("SELECT nome, email, telefone, cashback FROM clientes", (err, result) => {
-        if (err) {
-            console.error("Erro ao buscar clientes:", err);
-            return res.status(500).json({ error: "Erro no servidor ao buscar clientes." });
-        }
         res.json(result);
     });
 });
 
-// 🟢 Rota para atualizar informações do cliente (nome, telefone, email, saldo)
-app.put("/clientes/:telefone", (req, res) => {
-    const { telefone } = req.params;
-    const { novoNome, novoTelefone, novoEmail, novoSaldo } = req.body;
+// 🔹 Rota para cadastrar um novo cliente
+app.post("/clientes", autenticar, (req, res) => {
+    const { telefone, nome, email } = req.body;
+    const adminId = req.admin.adminId;
 
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
+    db.query("INSERT INTO clientes (telefone, nome, email, admin_id) VALUES (?, ?, ?, ?)",
+        [telefone, nome, email, adminId],
+        (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ message: "Cliente cadastrado com sucesso!" });
         }
-
-        // Pega os valores antigos caso algum campo não seja preenchido
-        const cliente = result[0];
-
-        const nomeFinal = novoNome || cliente.nome;
-        const telefoneFinal = novoTelefone || cliente.telefone;
-        const emailFinal = novoEmail || cliente.email;
-        const saldoFinal = novoSaldo !== undefined ? novoSaldo : cliente.cashback;
-
-        db.query(
-            "UPDATE clientes SET nome = ?, telefone = ?, email = ?, cashback = ? WHERE telefone = ?",
-            [nomeFinal, telefoneFinal, emailFinal, saldoFinal, telefone],
-            (err) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                res.json({ message: "Cliente atualizado com sucesso!" });
-            }
-        );
-    });
+    );
 });
 
-// 🟢 Rota para excluir um cliente e todas as suas transações
-app.delete("/clientes/:telefone", (req, res) => {
-    const { telefone } = req.params;
-
-    // Primeiro, remover as transações associadas ao cliente
-    db.query("DELETE FROM transacoes WHERE telefone = ?", [telefone], (err) => {
-        if (err) {
-            console.error("Erro ao deletar transações:", err);
-            return res.status(500).json({ error: "Erro ao deletar transações do cliente." });
-        }
-
-        // Depois, remover o próprio cliente
-        db.query("DELETE FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-            if (err) {
-                console.error("Erro ao deletar cliente:", err);
-                return res.status(500).json({ error: "Erro ao deletar cliente." });
-            }
-
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ error: "Cliente não encontrado." });
-            }
-
-            res.json({ message: "Cliente excluído com sucesso!" });
-        });
-    });
-});
-
-
-// 🟢 Insira suas credenciais Twilio aqui
-const accountSid = "AC6762393df4e55d32400274251f0b5d73";
-const authToken = "d144c69d9d4dc724a73cd23ec267180b";
-const twilioNumber = "+14155238886";
-
-// Inicializa o cliente do Twilio
-const client = twilio(accountSid, authToken);
-
-// Função para enviar mensagem no WhatsApp via Twilio
-
-// 🟢 Enviar mensagem no mesmo dia em que o cliente recebe cashback
-app.post("/clientes/:telefone/cashback", (req, res) => {
+// 🔹 Rota para adicionar cashback e salvar no histórico
+app.post("/clientes/:telefone/cashback", autenticar, (req, res) => {
     const { telefone } = req.params;
     const { valor } = req.body;
 
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+    db.query("UPDATE clientes SET cashback = cashback + ? WHERE telefone = ?", [valor, telefone], (err) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
-
-        db.query(
-            "UPDATE clientes SET cashback = cashback + ? WHERE telefone = ?",
-            [valor, telefone],
-            (err) => {
+        db.query("INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'adicionado', ?, NOW())", 
+            [telefone, valor], (err) => {
                 if (err) return res.status(500).json({ error: err.message });
-
-                // ✅ Enviar mensagem no mesmo dia
-                const mensagem = `Oi! Você recebeu R$${valor.toFixed(2)} de cashback! 🎉`;
-                enviarMensagemWhatsApp(telefone, mensagem);
-
-               
-                
-
-                res.json({ message: `Cashback de R$${valor} adicionado e mensagem enviada!` });
+                res.json({ message: `Cashback de R$${valor} adicionado com sucesso!` });
             }
         );
     });
 });
 
-const enviarMensagemWhatsApp = async (telefone, mensagem) => {
-    const twilio = require("twilio");
+// 🔹 Rota para usar cashback
+app.post("/clientes/:telefone/use-cashback", autenticar, (req, res) => {
+    const { telefone } = req.params;
+    const { valor } = req.body;
 
-    const client = twilio(accountSid, authToken);
+    db.query("SELECT cashback FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
 
-    try {
-        const response = await client.messages.create({
-            body: mensagem,
-            from: `whatsapp:${twilioNumber}`,
-            to: `whatsapp:+55${telefone}` // ✅ Garante que está no formato correto
-        });
+        const saldoAtual = Number(result[0]?.cashback) || 0;
+        if (saldoAtual < valor) return res.status(400).json({ message: "Saldo insuficiente." });
 
-        console.log(`📩 Mensagem enviada para ${telefone}: ${mensagem}`);
-        return response.sid;
-    } catch (error) {
-        console.error("❌ Erro ao enviar mensagem:", error.message);
-        return null;
-    }
-};
+        db.query("UPDATE clientes SET cashback = cashback - ? WHERE telefone = ?", [valor, telefone], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
 
-
-// Chamar a função de teste
-enviarMensagemWhatsApp("12991332677", "🔍 Teste: Se você recebeu essa mensagem, o Twilio está funcionando!");
-
-const cron = require("node-cron");
-
-// ✅ Agendar mensagem a cada 1 minuto (Para Testes) - Depois mude para "0 9 */10 * *" para cada 10 dias
-cron.schedule("0 0 */10 * *", async () => {
-    console.log("⏳ [CRON] Executando verificação de cashback...");
-
-    db.query("SELECT nome, telefone, cashback FROM clientes WHERE cashback > 0", (err, results) => {
-        if (err) {
-            console.error("❌ [ERRO] Falha ao buscar clientes:", err);
-            return;
-        }
-
-        if (results.length === 0) {
-            console.log("ℹ️ [CRON] Nenhum cliente com cashback para notificação.");
-            return;
-        }
-
-        results.forEach(cliente => {
-            const nome = cliente.nome;
-            const telefone = cliente.telefone;
-            const saldo = Number(cliente.cashback || 0).toFixed(2);
-
-            const mensagem = `Oi ${nome}! Você tem R$${saldo} de cashback disponível para gastar na Outlet! 💰`;
-
-            console.log(`📩 [CRON] Enviando mensagem para ${telefone}: ${mensagem}`);
-            enviarMensagemWhatsApp(telefone, mensagem)
-                .then(() => console.log(`✅ [CRON] Mensagem enviada para ${telefone}`))
-                .catch(error => console.error("❌ [ERRO] Falha ao enviar mensagem:", error.message));
+            db.query("INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'usado', ?, NOW())", 
+                [telefone, valor], (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ message: `Cashback de R$${valor} usado!` });
+                }
+            );
         });
     });
 });
 
+// 🔹 Rota para buscar histórico de transações
+app.get("/clientes/:telefone/transacoes", autenticar, (req, res) => {
+    const { telefone } = req.params;
 
-// Função para obter o IP da máquina onde o servidor está rodando
-const getLocalIP = () => {
-    const interfaces = os.networkInterfaces();
-    for (const interfaceName in interfaces) {
-        for (const iface of interfaces[interfaceName]) {
-            if (iface.family === "IPv4" && !iface.internal) {
-                return iface.address;
-            }
-        }
+    db.query("SELECT * FROM transacoes WHERE telefone = ? ORDER BY data DESC", [telefone], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(result);
+    });
+});
+
+// 🔹 Cron job para notificação a cada 10 dias
+cron.schedule("0 0 */10 * *", async () => {
+    db.query("SELECT nome, telefone, cashback FROM clientes WHERE cashback > 0", (err, results) => {
+        if (err) return console.error("Erro ao buscar clientes:", err);
+
+        results.forEach(cliente => {
+            const mensagem = `Oi ${cliente.nome}! Você tem R$${cliente.cashback.toFixed(2)} de cashback disponível! 💰`;
+            enviarMensagemWhatsApp(cliente.telefone, mensagem);
+        });
+    });
+});
+
+// 🔹 Função para enviar mensagem via Twilio
+const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+const enviarMensagemWhatsApp = async (telefone, mensagem) => {
+    try {
+        await twilioClient.messages.create({
+            body: mensagem,
+            from: `whatsapp:${process.env.TWILIO_NUMBER}`,
+            to: `whatsapp:+55${telefone}`
+        });
+    } catch (error) {
+        console.error("Erro ao enviar mensagem:", error.message);
     }
-    return "IP não encontrado";
 };
 
-// Função para iniciar Ngrok automaticamente ao rodar o servidor
-(async function startNgrok() {
-    try {
-      const url = await ngrok.connect(port);
-      console.log(`🚀 Backend disponível em: ${url}`);
-    } catch (error) {
-      console.error("❌ Erro ao iniciar o Ngrok:", error);
-    }
-  })();
-
-// Iniciar o servidor e exibir o IP no console
+// Iniciar servidor
 app.listen(port, () => {
     console.log(`🚀 Servidor rodando na porta ${port}`);
-    console.log(`🌍 IP do servidor: ${getLocalIP()}`);
 });
