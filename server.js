@@ -71,16 +71,12 @@ app.post("/login", async (req, res) => {
     db.query("SELECT * FROM administradores WHERE email = ?", [email], async (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        if (result.length === 0) {
-            return res.status(401).json({ message: "E-mail ou senha incorretos." });
-        }
+        if (result.length === 0) return res.status(401).json({ message: "E-mail ou senha incorretos." });
 
         const admin = result[0];
         const senhaCorreta = await bcrypt.compare(senha, admin.senha);
 
-        if (!senhaCorreta) {
-            return res.status(401).json({ message: "E-mail ou senha incorretos." });
-        }
+        if (!senhaCorreta) return res.status(401).json({ message: "E-mail ou senha incorretos." });
 
         const token = jwt.sign({ adminId: admin.id, email: admin.email }, SECRET_KEY, { expiresIn: "2h" });
 
@@ -89,14 +85,25 @@ app.post("/login", async (req, res) => {
 });
 
 // 🔹 Rota para buscar clientes do admin logado
-app.get("/clientes", autenticar, (req, res) => {
-    const adminId = req.admin.adminId;
+app.get("/clientes/:telefone", autenticar, (req, res) => {
+    const adminId = req.admin.adminId; // Obtém o ID do administrador logado
+    const { telefone } = req.params;
 
-    db.query("SELECT * FROM clientes WHERE admin_id = ?", [adminId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
-    });
+    db.query(
+        "SELECT * FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId], // 🔹 Filtra os clientes pelo ADMIN
+        (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            if (result.length > 0) {
+                res.json(result[0]);
+            } else {
+                res.status(404).json({ message: "Cliente não encontrado" });
+            }
+        }
+    );
 });
+
 
 // 🔹 Rota para cadastrar um novo cliente
 app.post("/clientes", autenticar, (req, res) => {
