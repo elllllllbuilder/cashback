@@ -71,12 +71,16 @@ app.post("/login", async (req, res) => {
     db.query("SELECT * FROM administradores WHERE email = ?", [email], async (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        if (result.length === 0) return res.status(401).json({ message: "E-mail ou senha incorretos." });
+        if (result.length === 0) {
+            return res.status(401).json({ message: "E-mail ou senha incorretos." });
+        }
 
         const admin = result[0];
         const senhaCorreta = await bcrypt.compare(senha, admin.senha);
 
-        if (!senhaCorreta) return res.status(401).json({ message: "E-mail ou senha incorretos." });
+        if (!senhaCorreta) {
+            return res.status(401).json({ message: "E-mail ou senha incorretos." });
+        }
 
         const token = jwt.sign({ adminId: admin.id, email: admin.email }, SECRET_KEY, { expiresIn: "2h" });
 
