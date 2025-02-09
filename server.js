@@ -64,6 +64,27 @@ app.post("/register", [
     );
 });
 
+app.get("/dashboard", autenticar, (req, res) => {
+    const adminId = req.admin.adminId; // Obtém o ID do administrador logado
+
+    db.query(
+        "SELECT SUM(cashback) AS total FROM clientes WHERE admin_id = ?",
+        [adminId], // 🔹 Filtra apenas os clientes do administrador logado
+        (err, result) => {
+            if (err) {
+                console.error("Erro ao buscar total de cashback:", err);
+                return res.status(500).json({ error: "Erro no servidor ao buscar total de cashback." });
+            }
+
+            const totalCashback = result[0].total || 0; // Se for null, retorna 0
+            console.log(`🔹 Total de cashback do admin ${adminId}: R$ ${totalCashback}`);
+
+            res.json({ total: totalCashback });
+        }
+    );
+});
+
+
 // 🔹 Rota para Login
 app.post("/login", async (req, res) => {
     const { email, senha } = req.body;
