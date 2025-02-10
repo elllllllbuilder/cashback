@@ -84,6 +84,15 @@ app.get("/dashboard", autenticar, (req, res) => {
     );
 });
 
+app.get("/clientes", autenticar, (req, res) => {
+    const adminId = req.admin.adminId; // Obtém o ID do administrador logado
+
+    db.query("SELECT * FROM clientes WHERE admin_id = ?", [adminId], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(result);
+    });
+});
+
 
 // 🔹 Rota para Login
 app.post("/login", async (req, res) => {
