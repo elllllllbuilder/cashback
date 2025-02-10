@@ -64,6 +64,37 @@ app.post("/register", [
     );
 });
 
+app.put("/clientes/:telefone", autenticar, (req, res) => {
+    const { telefone } = req.params;
+    const { novoNome, novoTelefone, novoEmail, novoSaldo } = req.body;
+
+    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        if (result.length === 0) {
+            return res.status(404).json({ message: "Cliente não encontrado" });
+        }
+
+        const cliente = result[0];
+
+        const nomeFinal = novoNome || cliente.nome;
+        const telefoneFinal = novoTelefone || cliente.telefone;
+        const emailFinal = novoEmail || cliente.email;
+        const saldoFinal = novoSaldo !== undefined ? novoSaldo : cliente.cashback;
+
+        db.query(
+            "UPDATE clientes SET nome = ?, telefone = ?, email = ?, cashback = ? WHERE telefone = ?",
+            [nomeFinal, telefoneFinal, emailFinal, saldoFinal, telefone],
+            (err) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                res.json({ message: "Cliente atualizado com sucesso!" });
+            }
+        );
+    });
+});
+
+
 app.get("/dashboard", autenticar, (req, res) => {
     const adminId = req.admin.adminId; // Obtém o ID do administrador logado
 
