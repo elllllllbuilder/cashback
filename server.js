@@ -64,6 +64,31 @@ app.post("/register", [
     );
 });
 
+app.delete("/clientes/:telefone", (req, res) => {
+    const { telefone } = req.params;
+
+    db.query("DELETE FROM transacoes WHERE telefone = ?", [telefone], (err) => {
+        if (err) {
+            console.error("Erro ao deletar transações:", err);
+            return res.status(500).json({ error: "Erro ao deletar transações do cliente." });
+        }
+
+        db.query("DELETE FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+            if (err) {
+                console.error("Erro ao deletar cliente:", err);
+                return res.status(500).json({ error: "Erro ao deletar cliente." });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: "Cliente não encontrado." });
+            }
+
+            res.json({ message: "Cliente excluído com sucesso!" });
+        });
+    });
+});
+
+
 app.put("/clientes/:telefone", autenticar, (req, res) => {
     const { telefone } = req.params;
     const { novoNome, novoTelefone, novoEmail, novoSaldo } = req.body;
