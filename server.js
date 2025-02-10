@@ -90,37 +90,41 @@ app.delete("/clientes/:telefone", (req, res) => {
     });
 });
 
-
+// 🔹 Rota para editar clientes
 app.put("/clientes/:telefone", autenticar, (req, res) => {
     const { telefone } = req.params;
     const { novoNome, novoTelefone, novoEmail, novoSaldo } = req.body;
+    const adminId = req.admin.adminId;
 
-    db.query("SELECT * FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
+    db.query(
+        "SELECT * FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId],
+        (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
 
-        if (result.length === 0) {
-            return res.status(404).json({ message: "Cliente não encontrado" });
-        }
-
-        const cliente = result[0];
-
-        const nomeFinal = novoNome || cliente.nome;
-        const telefoneFinal = novoTelefone || cliente.telefone;
-        const emailFinal = novoEmail || cliente.email;
-        const saldoFinal = novoSaldo !== undefined ? novoSaldo : cliente.cashback;
-
-        db.query(
-            "UPDATE clientes SET nome = ?, telefone = ?, email = ?, cashback = ? WHERE telefone = ?",
-            [nomeFinal, telefoneFinal, emailFinal, saldoFinal, telefone],
-            (err) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                res.json({ message: "Cliente atualizado com sucesso!" });
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Cliente não encontrado." });
             }
-        );
-    });
-});
 
+            const cliente = result[0];
+
+            const nomeFinal = novoNome || cliente.nome;
+            const telefoneFinal = novoTelefone || cliente.telefone;
+            const emailFinal = novoEmail || cliente.email;
+            const saldoFinal = novoSaldo !== undefined ? novoSaldo : cliente.cashback;
+
+            db.query(
+                "UPDATE clientes SET nome = ?, telefone = ?, email = ?, cashback = ? WHERE telefone = ? AND admin_id = ?",
+                [nomeFinal, telefoneFinal, emailFinal, saldoFinal, telefone, adminId],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+
+                    res.json({ message: "Cliente atualizado com sucesso!" });
+                }
+            );
+        }
+    );
+});
 
 app.get("/dashboard", autenticar, (req, res) => {
     const adminId = req.admin.adminId; // Obtém o ID do administrador logado
@@ -222,56 +226,103 @@ app.post("/clientes", autenticar, async (req, res) => {
     );
 });
 
-// 🔹 Rota para adicionar cashback e salvar no histórico
+// 🔹 Rota para adicionar cashback
 app.post("/clientes/:telefone/cashback", autenticar, (req, res) => {
     const { telefone } = req.params;
     const { valor } = req.body;
+    const adminId = req.admin.adminId;
 
-    db.query("UPDATE clientes SET cashback = cashback + ? WHERE telefone = ?", [valor, telefone], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
+    db.query(
+        "UPDATE clientes SET cashback = cashback + ? WHERE telefone = ? AND admin_id = ?",
+        [valor, telefone, adminId],
+        (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
 
-        db.query("INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'adicionado', ?, NOW())", 
-            [telefone, valor], (err) => {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json({ message: `Cashback de R$${valor} adicionado com sucesso!` });
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ message: "Cliente não encontrado." });
             }
-        );
-    });
+
+            db.query(
+                "INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'adicionado', ?, NOW())",
+                [telefone, valor],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ message: `Cashback de R$${valor} adicionado com sucesso!` });
+                }
+            );
+        }
+    );
 });
 
 // 🔹 Rota para usar cashback
 app.post("/clientes/:telefone/use-cashback", autenticar, (req, res) => {
     const { telefone } = req.params;
     const { valor } = req.body;
+    const adminId = req.admin.adminId;
 
-    db.query("SELECT cashback FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        const saldoAtual = Number(result[0]?.cashback) || 0;
-        if (saldoAtual < valor) return res.status(400).json({ message: "Saldo insuficiente." });
-
-        db.query("UPDATE clientes SET cashback = cashback - ? WHERE telefone = ?", [valor, telefone], (err) => {
+    db.query(
+        "SELECT cashback FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId],
+        (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
 
-            db.query("INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'usado', ?, NOW())", 
-                [telefone, valor], (err) => {
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Cliente não encontrado." });
+            }
+
+            const saldoAtual = Number(result[0]?.cashback) || 0;
+            if (saldoAtual < valor) {
+                return res.status(400).json({ message: "Saldo insuficiente." });
+            }
+
+            db.query(
+                "UPDATE clientes SET cashback = cashback - ? WHERE telefone = ? AND admin_id = ?",
+                [valor, telefone, adminId],
+                (err) => {
                     if (err) return res.status(500).json({ error: err.message });
-                    res.json({ message: `Cashback de R$${valor} usado!` });
+
+                    db.query(
+                        "INSERT INTO transacoes (telefone, tipo, valor, data) VALUES (?, 'usado', ?, NOW())",
+                        [telefone, valor],
+                        (err) => {
+                            if (err) return res.status(500).json({ error: err.message });
+                            res.json({ message: `Cashback de R$${valor} usado!` });
+                        }
+                    );
                 }
             );
-        });
-    });
+        }
+    );
 });
+
 
 // 🔹 Rota para buscar histórico de transações
 app.get("/clientes/:telefone/transacoes", autenticar, (req, res) => {
     const { telefone } = req.params;
+    const adminId = req.admin.adminId;
 
-    db.query("SELECT * FROM transacoes WHERE telefone = ? ORDER BY data DESC", [telefone], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
-    });
+    db.query(
+        "SELECT * FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId],
+        (err, result) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Cliente não encontrado." });
+            }
+
+            db.query(
+                "SELECT * FROM transacoes WHERE telefone = ? ORDER BY data DESC",
+                [telefone],
+                (err, transacoes) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json(transacoes);
+                }
+            );
+        }
+    );
 });
+
 
 // 🔹 Cron job para notificação a cada 10 dias
 cron.schedule("0 0 */10 * *", async () => {
