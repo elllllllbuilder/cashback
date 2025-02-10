@@ -66,29 +66,58 @@ app.post("/register", [
 
 
 
-app.delete("/clientes/:telefone", (req, res) => {
+// 🔹 Rota para excluir clientes
+app.delete("/clientes/:telefone", autenticar, (req, res) => {
     const { telefone } = req.params;
+    const adminId = req.admin.adminId; // Obtém o ID do administrador logado
 
-    db.query("DELETE FROM transacoes WHERE telefone = ?", [telefone], (err) => {
-        if (err) {
-            console.error("Erro ao deletar transações:", err);
-            return res.status(500).json({ error: "Erro ao deletar transações do cliente." });
-        }
-
-        db.query("DELETE FROM clientes WHERE telefone = ?", [telefone], (err, result) => {
+    // Primeiro, verifica se o cliente pertence ao admin logado
+    db.query(
+        "SELECT * FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId],
+        (err, result) => {
             if (err) {
-                console.error("Erro ao deletar cliente:", err);
-                return res.status(500).json({ error: "Erro ao deletar cliente." });
+                console.error("Erro ao buscar cliente:", err);
+                return res.status(500).json({ error: "Erro ao buscar cliente." });
             }
 
-            if (result.affectedRows === 0) {
-                return res.status(404).json({ error: "Cliente não encontrado." });
+            if (result.length === 0) {
+                return res.status(404).json({ message: "Cliente não encontrado ou não pertence a este administrador." });
             }
 
-            res.json({ message: "Cliente excluído com sucesso!" });
-        });
-    });
+            // Exclui transações associadas ao cliente para o admin logado
+            db.query(
+                "DELETE FROM transacoes WHERE telefone = ?",
+                [telefone],
+                (err) => {
+                    if (err) {
+                        console.error("Erro ao deletar transações:", err);
+                        return res.status(500).json({ error: "Erro ao deletar transações do cliente." });
+                    }
+
+                    // Exclui o cliente específico
+                    db.query(
+                        "DELETE FROM clientes WHERE telefone = ? AND admin_id = ?",
+                        [telefone, adminId],
+                        (err, result) => {
+                            if (err) {
+                                console.error("Erro ao deletar cliente:", err);
+                                return res.status(500).json({ error: "Erro ao deletar cliente." });
+                            }
+
+                            if (result.affectedRows === 0) {
+                                return res.status(404).json({ message: "Cliente não encontrado ou não pertence a este administrador." });
+                            }
+
+                            res.json({ message: "Cliente excluído com sucesso!" });
+                        }
+                    );
+                }
+            );
+        }
+    );
 });
+
 
 // 🔹 Rota para editar clientes
 app.put("/clientes/:telefone", autenticar, (req, res) => {
