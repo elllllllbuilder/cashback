@@ -14,17 +14,6 @@ const app = express();
 const port = process.env.PORT || 3000;
 const SECRET_KEY = process.env.SECRET_KEY || "secretcashkey";
 
-// Conexão com banco MySQL
-const db = mysql.createPool({
-    host: process.env.DB_HOST || "artfato.online",
-    user: process.env.DB_USER || "cashback",
-    password: process.env.DB_PASSWORD || "cashback@10",
-    database: process.env.DB_NAME || "cashback",
-    port: process.env.DB_PORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
 
 app.use(cors());
 app.use(express.json());
