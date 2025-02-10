@@ -8,7 +8,6 @@ const { body, validationResult } = require("express-validator");
 const twilio = require("twilio");
 const cron = require("node-cron");
 const os = require("os");
-const db = require("../config/database"); 
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -65,36 +64,7 @@ app.post("/register", [
     );
 });
 
-exports.login = async (req, res) => {
-    const { email, senha } = req.body;
 
-    try {
-        const [rows] = await db.execute("SELECT * FROM administradores WHERE email = ?", [email]);
-
-        if (rows.length === 0) {
-            return res.status(401).json({ message: "E-mail ou senha incorretos." });
-        }
-
-        const admin = rows[0]; // Obtém o primeiro resultado
-        const senhaValida = await bcrypt.compare(senha, admin.senha);
-
-        if (!senhaValida) {
-            return res.status(401).json({ message: "E-mail ou senha incorretos." });
-        }
-
-        // ✅ Agora inclui o nome do administrador
-        const token = jwt.sign({ adminId: admin.id }, "seuSegredoSuperSecreto", { expiresIn: "8h" });
-
-        res.json({
-            token,
-            nome: admin.nome // 🔥 Adicionando o nome do admin na resposta
-        });
-
-    } catch (error) {
-        console.error("Erro ao fazer login:", error);
-        res.status(500).json({ message: "Erro interno no servidor." });
-    }
-};
 
 app.delete("/clientes/:telefone", (req, res) => {
     const { telefone } = req.params;
