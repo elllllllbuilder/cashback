@@ -194,15 +194,30 @@ app.get("/clientes/:telefone", autenticar, (req, res) => {
 
 
 // 🔹 Rota para cadastrar um novo cliente
-app.post("/clientes", autenticar, (req, res) => {
+app.post("/clientes", autenticar, async (req, res) => {
     const { telefone, nome, email } = req.body;
     const adminId = req.admin.adminId;
 
-    db.query("INSERT INTO clientes (telefone, nome, email, admin_id) VALUES (?, ?, ?, ?)",
-        [telefone, nome, email, adminId],
-        (err) => {
+    // 🔎 Verifica se o telefone já existe para o mesmo admin
+    db.query(
+        "SELECT * FROM clientes WHERE telefone = ? AND admin_id = ?",
+        [telefone, adminId],
+        async (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ message: "Cliente cadastrado com sucesso!" });
+
+            if (result.length > 0) {
+                return res.status(400).json({ message: "Este telefone já está cadastrado para o seu usuário." });
+            }
+
+            // ✅ Se não existe, insere o novo cliente
+            db.query(
+                "INSERT INTO clientes (telefone, nome, email, admin_id) VALUES (?, ?, ?, ?)",
+                [telefone, nome, email, adminId],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ message: "Cliente cadastrado com sucesso!" });
+                }
+            );
         }
     );
 });
